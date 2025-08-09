@@ -1,0 +1,66 @@
+name: Build and Push job-backup-db Docker Image
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    name: Build & Push (multi-arch)
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: 🛒 Checkout source
+        uses: actions/checkout@v4
+
+      - name: 🧰 Set up QEMU (for multi-arch emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: 🧱 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔐 Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: 🏷️ Prepare tags & metadata
+        id: meta
+        run: |
+          echo "DATE=$(date -u +%Y%m%d)" >> $GITHUB_OUTPUT
+          echo "SHA_TAG=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          # ชื่อ image ของคุณ
+          echo "IMAGE=ygevo/job-backup-db" >> $GITHUB_OUTPUT
+
+      - name: 🏗️ Build and Push multi-arch Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          # cache ทำให้ build ไวขึ้น
+          cache-from: type=registry,ref=${{ steps.meta.outputs.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ steps.meta.outputs.IMAGE }}:buildcache,mode=max
+          # ใส่ build-args เป็นข้อมูลฝังใน image (ถ้าต้องใช้ใน Dockerfile ก็ ARG ไว้)
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            BUILD_DATE=${{ steps.meta.outputs.DATE }}
+            VERSION=${{ steps.meta.outputs.SHA_TAG }}
+          tags: |
+            ${{ steps.meta.outputs.IMAGE }}:latest
+            ${{ steps.meta.outputs.IMAGE }}:${{ steps.meta.outputs.SHA_TAG }}
+            ${{ steps.meta.outputs.IMAGE }}:${{ steps.meta.outputs.DATE }}
+          # ใส่ labels (ใช้ดูใน registry)
+          labels: |
+            org.opencontainers.image.title=job-backup-db
+            org.opencontainers.image.description=Monthly PostgreSQL dump (Node.js + node-cron) 
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ steps.meta.outputs.DATE }}
